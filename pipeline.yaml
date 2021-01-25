@@ -76,7 +76,7 @@ jobs:
                 ROOT=$(pwd)
                 cd ${ROOT}/source/test
                 make
-                cp ../bin/test ${ROOT}/install
+                cp ../bin/* ${ROOT}/install
 
       - put: gh-release
         params:
