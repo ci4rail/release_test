@@ -2,7 +2,7 @@
 # Project configuration
 # -----------------------------
 ## Defines the name for the project
-name: release_test
+name: release-test
 
 # Git configuration
 # -----------------

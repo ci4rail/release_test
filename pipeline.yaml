@@ -4,7 +4,7 @@ resources:
     type: docker-image
     source:
       repository: elbb/bb-gitversion
-      tag: 0.8.0
+      tag: 0.6.2
 
   - name: image-golang
     type: docker-image
@@ -39,48 +39,44 @@ jobs:
           - get: source
             trigger: true
           - get: image-golang
-      - in_parallel:
-          - task: generate-version
-            image: image-bb-gitversion-tool
-            config:
-              platform: linux
-              inputs:
-                - name: source
-              outputs:
-                - name: gitversion
-              run:
-                path: /bin/bash
-                args:
-                  - -exc
-                  - |
-                    entrypoint.sh &&
-                    jq empty gitversion/json/gitversion.json &&
-                    cat gitversion/json/gitversion.json
-              params:
-                GIT_PATH: source
-                GEN_PATH: gitversion
-                DEFAULT_BRANCH: ((git_branch))
+      - task: generate-version
+        image: image-bb-gitversion-tool
+        config:
+          platform: linux
+          inputs:
+            - name: source
+          outputs:
+            - name: gitversion
+          run:
+            path: /bin/bash
+            args:
+              - -exc
+              - |
+                entrypoint.sh &&
+                jq empty gitversion/json/gitversion.json &&
+                cat gitversion/json/gitversion.json
+          params:
+            GIT_PATH: source
+            GEN_PATH: gitversion
 
-      - in_parallel:
-          - task: build-kyt-cli
-            image: image-golang
-            config:
-              platform: linux
-              inputs:
-                - name: source
-                - name: gitversion
-              outputs:
-                - name: install
-              run:
-                path: /bin/bash
-                args:
-                  - -ec
-                  - |
-                    ROOT=$(pwd)
-                    cd ${ROOT}/source/test
-                    make
-                    # copy the artifacts as a
-                    cp ../bin/test ${ROOT}/install
+      - task: build-kyt-cli
+        image: image-golang
+        config:
+          platform: linux
+          inputs:
+            - name: source
+            - name: gitversion
+          outputs:
+            - name: install
+          run:
+            path: /bin/bash
+            args:
+              - -ec
+              - |
+                ROOT=$(pwd)
+                cd ${ROOT}/source/test
+                make
+                cp ../bin/test ${ROOT}/install
 
       - put: gh-release
         params:
