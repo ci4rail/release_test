@@ -1,10 +1,15 @@
 resources:
-  # Upstream docker images
-  - name: image-bb-gitversion-tool
+  - name: image-changelog-tool
     type: docker-image
     source:
-      repository: elbb/bb-gitversion
-      tag: 0.6.2
+      repository: ferrarimarco/github-changelog-generator 
+      tag: latest
+
+  - name: image-git-tool
+    type: docker-image
+    source:
+      repository: alpine/git
+      tag: v2.26.2
 
   - name: image-golang
     type: docker-image
@@ -17,6 +22,8 @@ resources:
     type: git
     source:
       uri: ((git_source))
+      tag_filter: "make-release-*.*.*"
+      private_key: ((private_key))
       branch: ((git_branch))
       skip_ssl_verification: ((git_skip_ssl_verification))
 
@@ -27,37 +34,81 @@ resources:
       owner: ci4rail
       repository: release_test
       access_token: ((github_access_token))
-      release: false
-      pre_release: true
+      release: true
 
 jobs:
-  - name: build-((name))
+  - name: release-((name))
     public: true
     plan:
       - in_parallel:
-          - get: image-bb-gitversion-tool
+          - get: image-git-tool
           - get: source
             trigger: true
           - get: image-golang
-      - task: generate-version
-        image: image-bb-gitversion-tool
+          - get: image-changelog-tool
+      - task: get-make-release-tag
+        image: image-git-tool
         config:
           platform: linux
           inputs:
             - name: source
           outputs:
-            - name: gitversion
+            - name: release-tag
           run:
-            path: /bin/bash
+            path: /bin/sh
             args:
               - -exc
               - |
-                entrypoint.sh &&
-                jq empty gitversion/json/gitversion.json &&
-                cat gitversion/json/gitversion.json
-          params:
-            GIT_PATH: source
-            GEN_PATH: gitversion
+                echo $(cd source && git tag --points-at HEAD | grep make-release) > release-tag/oldtag
+                echo $(cd source && git tag --points-at HEAD | grep make-release | awk -F"make-release-" '{print $2}') > release-tag/tag
+                cat release-tag/tag
+
+      - task: generate-changelog
+        image: image-changelog-tool
+        config:
+          platform: linux
+          inputs:
+            - name: source
+            - name: release-tag
+          outputs:
+            - name: changelog
+          run:
+            path: /bin/sh
+            args:
+              - -ec
+              - |
+                ROOT=$(pwd)
+                cd changelog 
+                github_changelog_generator -t 79a0d3b7b8b435c08f24ea2c9cbeb27a29979ecc --user ci4rail --project release_test
+                sed -i "s/$(cat ${ROOT}/release-tag/oldtag)/$(cat ${ROOT}/release-tag/tag)/g" ${ROOT}/changelog/CHANGELOG.md
+                cat ${ROOT}/changelog/CHANGELOG.md
+
+      - task: commit-changelog
+        image: image-git-tool
+        config:
+          platform: linux
+          inputs:
+            - name: source
+            - name: changelog
+            - name: release-tag
+          outputs:
+            - name: source
+          run:
+            path: /bin/sh
+            args:
+              - -ec
+              - |
+                ROOT=$(pwd)
+                cd source
+                cp ${ROOT}/changelog/CHANGELOG.md .
+                git config --global user.email "engineering@ci4rail.com"
+                git config --global user.name "yoda-ci4rail"
+                git add CHANGELOG.md
+                git commit -am "Updated CHANGELOG.md for release $(cat ${ROOT}/release-tag/tag)"
+  
+      - put: source
+        params: 
+          repository: source
 
       - task: build-kyt-cli
         image: image-golang
@@ -65,7 +116,7 @@ jobs:
           platform: linux
           inputs:
             - name: source
-            - name: gitversion
+            - name: release-tag
           outputs:
             - name: install
           run:
@@ -75,12 +126,119 @@ jobs:
               - |
                 ROOT=$(pwd)
                 cd ${ROOT}/source/test
-                make
+                VERSION=$(cat ${ROOT}/release-tag/tag) make
                 cp ../bin/* ${ROOT}/install
+                ${ROOT}/install/test-linux
 
       - put: gh-release
         params:
-          name: gitversion/plain/InformationalVersion
-          tag: gitversion/plain/InformationalVersion
+          name: release-tag/tag
+          tag: release-tag/tag
           globs:
             - install/*
+
+      # - task: test-kyt-cli
+      #   image: image-golang
+      #   config:
+      #     platform: linux
+      #     inputs:
+      #       - name: install
+      #       - name: release-tag
+      #     run:
+      #       path: /bin/bash
+      #       args:
+      #         - -ec
+      #         - |
+      #           echo success
+
+
+
+
+
+  # - name: release-((name))
+  #   public: true
+  #   plan:
+  #     - in_parallel:
+  #         - get: image-bb-gitversion-tool
+  #         - get: source-tag
+  #           trigger: true
+  #         - get: image-golang
+
+  #     - task: generate-version
+  #       image: image-bb-gitversion-tool
+  #       config:
+  #         platform: linux
+  #         inputs:
+  #           - name: source-tag
+  #         outputs:
+  #           - name: gitversion
+  #         run:
+  #           path: /bin/bash
+  #           args:
+  #             - -exc
+  #             - |
+  #               entrypoint.sh &&
+  #               jq empty gitversion/json/gitversion.json &&
+  #               cat gitversion/json/gitversion.json
+  #         params:
+  #           GIT_PATH: source
+  #           GEN_PATH: gitversion
+
+  #     - task: build-kyt-cli
+  #       image: image-golang
+  #       config:
+  #         platform: linux
+  #         inputs:
+  #           - name: source-tag
+  #           - name: gitversion
+  #         outputs:
+  #           - name: install
+  #         run:
+  #           path: /bin/bash
+  #           args:
+  #             - -ec
+  #             - |
+  #               ROOT=$(pwd)
+  #               cd ${ROOT}/source-tag/test
+  #               VERSION=$(cat ${ROOT}/gitversion/plain/InformationalVersion) make
+  #               cp ../bin/* ${ROOT}/install
+
+  #     - task: test-kyt-cli
+  #       image: image-golang
+  #       config:
+  #         platform: linux
+  #         inputs:
+  #           - name: install
+  #           - name: gitversion
+  #         run:
+  #           path: /bin/bash
+  #           args:
+  #             - -ec
+  #             - |
+  #               if [ "$(install/test-linux | grep $(cat ${ROOT}/gitversion/plain/SemVer) | wc -l)" != "1" ]; then
+  #                 exit 1
+  #               fi
+
+  #     - task: changelog
+  #       image: image-changelog-tool
+  #       config:
+  #         platform: linux
+  #         inputs:
+  #           - name: install
+  #           - name: gitversion
+  #         run:
+  #           path: /bin/bash
+  #           args:
+  #             - -ec
+  #             - |
+  #               if [ "$(install/test-linux | grep $(cat ${ROOT}/gitversion/plain/SemVer) | wc -l)" != "1" ]; then
+  #                 exit 1
+  #               fi
+                
+
+  #     - put: gh-release
+  #       params:
+  #         name: gitversion/plain/SemVer
+  #         tag: gitversion/plain/SemVer
+  #         globs:
+  #           - install/*
