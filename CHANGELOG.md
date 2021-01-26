@@ -1,8 +1,20 @@
 # Changelog
 
+## [2.4.0](https://github.com/ci4rail/release_test/tree/2.4.0) (2021-01-26)
+
+[Full Changelog](https://github.com/ci4rail/release_test/compare/2.3.5...2.4.0)
+
+**Merged pull requests:**
+
+- Feature/asdf [\#1](https://github.com/ci4rail/release_test/pull/1) ([siredmar](https://github.com/siredmar))
+
 ## [2.3.5](https://github.com/ci4rail/release_test/tree/2.3.5) (2021-01-26)
 
-[Full Changelog](https://github.com/ci4rail/release_test/compare/2.3.4...2.3.5)
+[Full Changelog](https://github.com/ci4rail/release_test/compare/make-release-2.3.5...2.3.5)
+
+## [make-release-2.3.5](https://github.com/ci4rail/release_test/tree/make-release-2.3.5) (2021-01-26)
+
+[Full Changelog](https://github.com/ci4rail/release_test/compare/2.3.4...make-release-2.3.5)
 
 ## [2.3.4](https://github.com/ci4rail/release_test/tree/2.3.4) (2021-01-26)
 
@@ -10,19 +22,19 @@
 
 ## [make-release-2.3.4](https://github.com/ci4rail/release_test/tree/make-release-2.3.4) (2021-01-26)
 
-[Full Changelog](https://github.com/ci4rail/release_test/compare/0.2.1-2.Branch.main.Sha.f15e8ad8bad0526228bb9730da09dae16f5559b8...make-release-2.3.4)
-
-## [0.2.1-2.Branch.main.Sha.f15e8ad8bad0526228bb9730da09dae16f5559b8](https://github.com/ci4rail/release_test/tree/0.2.1-2.Branch.main.Sha.f15e8ad8bad0526228bb9730da09dae16f5559b8) (2021-01-25)
-
-[Full Changelog](https://github.com/ci4rail/release_test/compare/0.3.0...0.2.1-2.Branch.main.Sha.f15e8ad8bad0526228bb9730da09dae16f5559b8)
-
-## [0.3.0](https://github.com/ci4rail/release_test/tree/0.3.0) (2021-01-25)
-
-[Full Changelog](https://github.com/ci4rail/release_test/compare/0.2.2...0.3.0)
+[Full Changelog](https://github.com/ci4rail/release_test/compare/0.2.2...make-release-2.3.4)
 
 ## [0.2.2](https://github.com/ci4rail/release_test/tree/0.2.2) (2021-01-25)
 
-[Full Changelog](https://github.com/ci4rail/release_test/compare/0.2.1...0.2.2)
+[Full Changelog](https://github.com/ci4rail/release_test/compare/0.3.0...0.2.2)
+
+## [0.3.0](https://github.com/ci4rail/release_test/tree/0.3.0) (2021-01-25)
+
+[Full Changelog](https://github.com/ci4rail/release_test/compare/0.2.1-2.Branch.main.Sha.f15e8ad8bad0526228bb9730da09dae16f5559b8...0.3.0)
+
+## [0.2.1-2.Branch.main.Sha.f15e8ad8bad0526228bb9730da09dae16f5559b8](https://github.com/ci4rail/release_test/tree/0.2.1-2.Branch.main.Sha.f15e8ad8bad0526228bb9730da09dae16f5559b8) (2021-01-25)
+
+[Full Changelog](https://github.com/ci4rail/release_test/compare/0.2.1...0.2.1-2.Branch.main.Sha.f15e8ad8bad0526228bb9730da09dae16f5559b8)
 
 ## [0.2.1](https://github.com/ci4rail/release_test/tree/0.2.1) (2021-01-25)
 
