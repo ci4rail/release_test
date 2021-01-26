@@ -22,7 +22,7 @@ resources:
     type: git
     source:
       uri: ((git_source))
-      tag_filter: "make-release-*.*.*"
+      tag_regex: make-release-\d+.\d+.\d+
       private_key: ((private_key))
       branch: ((git_branch))
       skip_ssl_verification: ((git_skip_ssl_verification))
