@@ -22,10 +22,20 @@ resources:
     type: git
     source:
       uri: ((git_source))
-      tag_regex: make-release-\d+.\d+.\d+
+      tag_filter: "make-release-*.*.*"
       private_key: ((private_key))
       branch: ((git_branch))
       skip_ssl_verification: ((git_skip_ssl_verification))
+
+  # second source resource needed because of the changelog commit. If used with only one
+  # resource, the commit triggers the build pipeline
+  - name: source-modified
+    type: git
+    source:
+      uri: ((git_source))
+      private_key: ((private_key))
+      branch: ((git_branch))
+      skip_ssl_verification: ((git_skip_ssl_verification))      
 
   # Github release
   - name: gh-release
@@ -44,6 +54,7 @@ jobs:
           - get: image-git-tool
           - get: source
             trigger: true
+          - get: source-modified
           - get: image-golang
           - get: image-changelog-tool
       - task: get-make-release-tag
@@ -88,34 +99,34 @@ jobs:
         config:
           platform: linux
           inputs:
-            - name: source
             - name: changelog
             - name: release-tag
+            - name: source-modified
           outputs:
-            - name: source
+            - name: source-modified
           run:
             path: /bin/sh
             args:
               - -ec
               - |
                 ROOT=$(pwd)
-                cd source
+                cd source-modified
                 cp ${ROOT}/changelog/CHANGELOG.md .
                 git config --global user.email "engineering@ci4rail.com"
                 git config --global user.name "yoda-ci4rail"
                 git add CHANGELOG.md
                 git commit -am "Updated CHANGELOG.md for release $(cat ${ROOT}/release-tag/tag)"
   
-      - put: source
+      - put: source-modified
         params: 
-          repository: source
+          repository: source-modified
 
       - task: build-kyt-cli
         image: image-golang
         config:
           platform: linux
           inputs:
-            - name: source
+            - name: source-modified
             - name: release-tag
           outputs:
             - name: install
@@ -125,7 +136,7 @@ jobs:
               - -ec
               - |
                 ROOT=$(pwd)
-                cd ${ROOT}/source/test
+                cd ${ROOT}/source-modified/test
                 VERSION=$(cat ${ROOT}/release-tag/tag) make
                 cp ../bin/* ${ROOT}/install
                 ${ROOT}/install/test-linux
