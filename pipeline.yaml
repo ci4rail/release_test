@@ -79,7 +79,7 @@ jobs:
               - |
                 ROOT=$(pwd)
                 cd changelog 
-                github_changelog_generator -t 79a0d3b7b8b435c08f24ea2c9cbeb27a29979ecc --user ci4rail --project release_test
+                github_changelog_generator -t ((github_access_token)) --user ci4rail --project release_test
                 sed -i "s/$(cat ${ROOT}/release-tag/oldtag)/$(cat ${ROOT}/release-tag/tag)/g" ${ROOT}/changelog/CHANGELOG.md
                 cat ${ROOT}/changelog/CHANGELOG.md
 
