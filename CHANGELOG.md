@@ -1,8 +1,8 @@
 # Changelog
 
-## [2.5.1](https://github.com/ci4rail/release_test/tree/2.5.1) (2021-01-26)
+## [1.2.3](https://github.com/ci4rail/release_test/tree/1.2.3) (2021-01-26)
 
-[Full Changelog](https://github.com/ci4rail/release_test/compare/2.4.0...2.5.1)
+[Full Changelog](https://github.com/ci4rail/release_test/compare/2.4.0...1.2.3)
 
 **Merged pull requests:**
 
