@@ -1,16 +1,24 @@
 # Changelog
 
+## [3.1.0](https://github.com/ci4rail/release_test/tree/3.1.0) (2021-01-27)
+
+[Full Changelog](https://github.com/ci4rail/release_test/compare/3.0.0...3.1.0)
+
 ## [3.0.0](https://github.com/ci4rail/release_test/tree/3.0.0) (2021-01-26)
 
-[Full Changelog](https://github.com/ci4rail/release_test/compare/make-release-2.7.0...3.0.0)
+[Full Changelog](https://github.com/ci4rail/release_test/compare/make-release-3.0.0...3.0.0)
 
-## [make-release-2.7.0](https://github.com/ci4rail/release_test/tree/make-release-2.7.0) (2021-01-26)
+## [make-release-3.0.0](https://github.com/ci4rail/release_test/tree/make-release-3.0.0) (2021-01-26)
 
-[Full Changelog](https://github.com/ci4rail/release_test/compare/2.6.0...make-release-2.7.0)
+[Full Changelog](https://github.com/ci4rail/release_test/compare/2.6.0...make-release-3.0.0)
 
 ## [2.6.0](https://github.com/ci4rail/release_test/tree/2.6.0) (2021-01-26)
 
-[Full Changelog](https://github.com/ci4rail/release_test/compare/make-release-2.6.0...2.6.0)
+[Full Changelog](https://github.com/ci4rail/release_test/compare/make-release-2.7.0...2.6.0)
+
+## [make-release-2.7.0](https://github.com/ci4rail/release_test/tree/make-release-2.7.0) (2021-01-26)
+
+[Full Changelog](https://github.com/ci4rail/release_test/compare/make-release-2.6.0...make-release-2.7.0)
 
 ## [make-release-2.6.0](https://github.com/ci4rail/release_test/tree/make-release-2.6.0) (2021-01-26)
 
