@@ -5,6 +5,12 @@ resources:
       repository: ferrarimarco/github-changelog-generator 
       tag: latest
 
+  - name: image-curl-tool
+    type: docker-image
+    source:
+      repository: curlimages/curl
+      tag: 7.74.0
+      
   - name: image-bb-gitversion-tool
     type: docker-image
     source:
@@ -88,6 +94,20 @@ resources:
       repository: release_test
       access_token: ((github_access_token))
       release: true
+
+unfreeze-release-branch: &unfreeze-release-branch
+  platform: linux
+  image_resource:
+    type: docker-image
+    source:
+      repository: curlimages/curl
+      tag: 7.74.0
+  run:
+    path: /bin/sh
+    args:
+      - -exc
+      - |
+        curl -d "frozen=false&user_name=((freeze_user))" -X POST ((freeze_uri))((freeze_token))
 
 jobs:
   - name: staging-((name))
@@ -184,6 +204,18 @@ jobs:
           - get: source-release-modified
           - get: image-golang
           - get: image-changelog-tool
+          - get: image-curl-tool
+      - task: freeze-release-branch
+        image: image-curl-tool
+        config:
+          platform: linux
+          run:
+            path: /bin/sh
+            args:
+              - -exc
+              - |
+                curl -d "frozen=true&user_name=((freeze_user))" -X POST ((freeze_uri))((freeze_token))
+      
       - task: get-make-release-tag
         image: image-git-tool
         config:
@@ -200,6 +232,10 @@ jobs:
                 echo $(cd source-release && git tag --points-at HEAD | grep make-release) > release-tag/oldtag
                 echo $(cd source-release && git tag --points-at HEAD | grep make-release | awk -F"make-release-" '{print $2}') > release-tag/tag
                 cat release-tag/tag
+        on_failure:
+          task: task-failure
+          config:
+            << : *unfreeze-release-branch
 
       - task: generate-changelog
         image: image-changelog-tool
@@ -220,6 +256,10 @@ jobs:
                 github_changelog_generator -t ((github_access_token)) --user ci4rail --project release_test
                 sed -i "s/$(cat ${ROOT}/release-tag/oldtag)/$(cat ${ROOT}/release-tag/tag)/g" ${ROOT}/changelog/CHANGELOG.md
                 cat ${ROOT}/changelog/CHANGELOG.md
+        on_failure:
+          task: task-failure
+          config:
+            << : *unfreeze-release-branch
 
       - task: commit-changelog
         image: image-git-tool
@@ -243,10 +283,18 @@ jobs:
                 git config --global user.name "yoda-ci4rail"
                 git add CHANGELOG.md
                 git commit -am "Updated CHANGELOG.md for release $(cat ${ROOT}/release-tag/tag)"
+          on_failure:
+            task: task-failure
+            config:
+              << : *unfreeze-release-branch
   
       - put: source-release-modified
         params: 
           repository: source-release-modified
+        on_failure:
+          task: task-failure
+          config:
+            << : *unfreeze-release-branch
 
       - task: build-kyt-cli
         image: image-golang
@@ -267,6 +315,10 @@ jobs:
                 VERSION=$(cat ${ROOT}/release-tag/tag) make
                 cp ../bin/* ${ROOT}/install
                 ${ROOT}/install/test-linux
+        on_failure:
+          task: task-failure
+          config:
+            << : *unfreeze-release-branch
 
       - put: gh-release
         params:
@@ -274,109 +326,11 @@ jobs:
           tag: release-tag/tag
           globs:
             - install/*
+        on_failure:
+          task: task-failure
+          config:
+            << : *unfreeze-release-branch
 
-      # - task: test-kyt-cli
-      #   image: image-golang
-      #   config:
-      #     platform: linux
-      #     inputs:
-      #       - name: install
-      #       - name: release-tag
-      #     run:
-      #       path: /bin/bash
-      #       args:
-      #         - -ec
-      #         - |
-      #           echo success
-
-
-
-
-
-  # - name: release-((name))
-  #   public: true
-  #   plan:
-  #     - in_parallel:
-  #         - get: image-bb-gitversion-tool
-  #         - get: source-tag
-  #           trigger: true
-  #         - get: image-golang
-
-  #     - task: generate-version
-  #       image: image-bb-gitversion-tool
-  #       config:
-  #         platform: linux
-  #         inputs:
-  #           - name: source-tag
-  #         outputs:
-  #           - name: gitversion
-  #         run:
-  #           path: /bin/bash
-  #           args:
-  #             - -exc
-  #             - |
-  #               entrypoint.sh &&
-  #               jq empty gitversion/json/gitversion.json &&
-  #               cat gitversion/json/gitversion.json
-  #         params:
-  #           GIT_PATH: source
-  #           GEN_PATH: gitversion
-
-  #     - task: build-kyt-cli
-  #       image: image-golang
-  #       config:
-  #         platform: linux
-  #         inputs:
-  #           - name: source-tag
-  #           - name: gitversion
-  #         outputs:
-  #           - name: install
-  #         run:
-  #           path: /bin/bash
-  #           args:
-  #             - -ec
-  #             - |
-  #               ROOT=$(pwd)
-  #               cd ${ROOT}/source-tag/test
-  #               VERSION=$(cat ${ROOT}/gitversion/plain/InformationalVersion) make
-  #               cp ../bin/* ${ROOT}/install
-
-  #     - task: test-kyt-cli
-  #       image: image-golang
-  #       config:
-  #         platform: linux
-  #         inputs:
-  #           - name: install
-  #           - name: gitversion
-  #         run:
-  #           path: /bin/bash
-  #           args:
-  #             - -ec
-  #             - |
-  #               if [ "$(install/test-linux | grep $(cat ${ROOT}/gitversion/plain/SemVer) | wc -l)" != "1" ]; then
-  #                 exit 1
-  #               fi
-
-  #     - task: changelog
-  #       image: image-changelog-tool
-  #       config:
-  #         platform: linux
-  #         inputs:
-  #           - name: install
-  #           - name: gitversion
-  #         run:
-  #           path: /bin/bash
-  #           args:
-  #             - -ec
-  #             - |
-  #               if [ "$(install/test-linux | grep $(cat ${ROOT}/gitversion/plain/SemVer) | wc -l)" != "1" ]; then
-  #                 exit 1
-  #               fi
-                
-
-  #     - put: gh-release
-  #       params:
-  #         name: gitversion/plain/SemVer
-  #         tag: gitversion/plain/SemVer
-  #         globs:
-  #           - install/*
+      - task: unfreeze-release-branch
+        config:
+          << : *unfreeze-release-branch
