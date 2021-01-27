@@ -5,6 +5,12 @@ resources:
       repository: ferrarimarco/github-changelog-generator 
       tag: latest
 
+  - name: image-bb-gitversion-tool
+    type: docker-image
+    source:
+      repository: elbb/bb-gitversion
+      tag: 0.7.0
+
   - name: image-git-tool
     type: docker-image
     source:
@@ -51,13 +57,25 @@ resources:
       branch: ((git_release_branch))
       skip_ssl_verification: ((git_skip_ssl_verification))      
 
+
+
   # S3 buckets
-  - name: s3-staging
+  - name: s3-staging-test-windows
     type: s3
     source:
       bucket: ((staging_s3_bucket))
       endpoint: ((s3_endpoint))
-      regexp: ((name))/test(.*)
+      regexp: ((name))/test-windows-(.*)
+      access_key_id: ((s3_access_key))
+      secret_access_key: ((s3_secret_key))
+      disable_ssl: ((s3_skip_ssl_verification))
+
+  - name: s3-staging-test-linux
+    type: s3
+    source:
+      bucket: ((staging_s3_bucket))
+      endpoint: ((s3_endpoint))
+      regexp: ((name))/test-linux-(.*)
       access_key_id: ((s3_access_key))
       secret_access_key: ((s3_secret_key))
       disable_ssl: ((s3_skip_ssl_verification))
@@ -80,35 +98,56 @@ jobs:
             trigger: true
           - get: image-golang
           - get: image-aws-cli
+          - get: image-bb-gitversion-tool
+      - in_parallel:
+        - task: generate-version
+          image: image-bb-gitversion-tool
+          config:
+            platform: linux
+            inputs:
+              - name: source-staging
+            outputs:
+              - name: gitversion
+            run:
+              path: /bin/bash
+              args:
+                - -exc
+                - |
+                  entrypoint.sh &&
+                  jq empty gitversion/json/gitversion.json &&
+                  cat gitversion/json/gitversion.json
+            params:
+              GIT_PATH: source-staging
+              GEN_PATH: gitversion
 
-      - task: check-or-create-bucket-for-((staging_s3_bucket))-on-s3
-        image: image-aws-cli
-        config:
-          platform: linux
-          run:
-            path: /bin/bash
-            args:
-              - -xc
-              - |
-                mkdir -p ~/.aws
-                # hide setting credentials in plain text in concourse ui
-                set +x
-                export TERM="xterm-256color"
-                echo "[default]" > ~/.aws/credentials
-                echo "aws_access_key_id=((s3_access_key))" >> ~/.aws/credentials
-                echo "aws_secret_access_key=((s3_secret_key))" >> ~/.aws/credentials
-                set -x
-                # check if bucket exists on s3 endpoint. If not create one
-                aws --endpoint-url ((s3_endpoint)) s3api head-bucket --bucket ((staging_s3_bucket)) 2> /dev/null
-                if [ $? != 0 ]; then aws s3 mb s3://((staging_s3_bucket)) --endpoint-url ((s3_endpoint)); fi
+        - task: check-or-create-bucket-for-((staging_s3_bucket))-on-s3
+          image: image-aws-cli
+          config:
+            platform: linux
+            run:
+              path: /bin/bash
+              args:
+                - -xc
+                - |
+                  mkdir -p ~/.aws
+                  # hide setting credentials in plain text in concourse ui
+                  set +x
+                  export TERM="xterm-256color"
+                  echo "[default]" > ~/.aws/credentials
+                  echo "aws_access_key_id=((s3_access_key))" >> ~/.aws/credentials
+                  echo "aws_secret_access_key=((s3_secret_key))" >> ~/.aws/credentials
+                  set -x
+                  # check if bucket exists on s3 endpoint. If not create one
+                  aws --endpoint-url ((s3_endpoint)) s3api head-bucket --bucket ((staging_s3_bucket)) 2> /dev/null
+                  if [ $? != 0 ]; then aws s3 mb s3://((staging_s3_bucket)) --endpoint-url ((s3_endpoint)); fi
 
-      - task: build-kyt-cli
+      - task: build-test
         image: image-golang
         config:
           platform: linux
           inputs:
-            - name: source-release-modified
-            - name: release-tag
+            - name: source-staging
+            - name: gitversion
           outputs:
             - name: install
           run:
@@ -117,14 +156,22 @@ jobs:
               - -ec
               - |
                 ROOT=$(pwd)
-                cd ${ROOT}/source-staging-modified/test
-                VERSION=$(cat ${ROOT}/staging-tag/tag) make
-                cp ../bin/* ${ROOT}/install
-                ${ROOT}/install/test-linux
+                cd ${ROOT}/source-staging/test
+                export VERSION=$(cat ${ROOT}/gitversion/plain/InformationalVersion)
+                make
+                mkdir -p ${ROOT}/install/${VERSION}/
+                cp ../bin/test-linux ${ROOT}/install/test-linux-${VERSION}
+                cp ../bin/test-windows.exe ${ROOT}/install/test-windows-${VERSION}.exe
+                ${ROOT}/install/test-linux*
 
-      - put: s3-staging
+      - put: s3-staging-test-linux
         params:
-          file: install/test*
+          file: install/test-linux-*
+          acl: public-read
+
+      - put: s3-staging-test-windows
+        params:
+          file: install/test-windows-*
           acl: public-read
 
   - name: release-((name))
