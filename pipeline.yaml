@@ -5,6 +5,18 @@ resources:
       repository: ferrarimarco/github-changelog-generator 
       tag: latest
 
+  - name: image-curl-tool
+    type: docker-image
+    source:
+      repository: curlimages/curl
+      tag: 7.74.0
+      
+  - name: image-bb-gitversion-tool
+    type: docker-image
+    source:
+      repository: elbb/bb-gitversion
+      tag: 0.7.0
+
   - name: image-git-tool
     type: docker-image
     source:
@@ -24,7 +36,8 @@ resources:
       tag: 2.0.22
 
   # Git sources
-  - name: source-staging
+  # testing
+  - name: source-testing
     type: git
     source:
       uri: ((git_source))
@@ -32,32 +45,75 @@ resources:
       branch: ((git_branch))
       skip_ssl_verification: ((git_skip_ssl_verification))
 
-  - name: source-release
+# staging
+  - name: source-staging
     type: git
     source:
       uri: ((git_source))
-      tag_regex: make-release-[0-9]+.[0-9]+.[0-9]+
+      tag_regex: staging-[0-9]+.[0-9]+.[0-9]+
       private_key: ((private_key))
       branch: ((git_release_branch))
       skip_ssl_verification: ((git_skip_ssl_verification))
 
-  # second source-release resource-release needed because of the changelog commit. If used with only one
-  # resource-release, the commit triggers the build pipeline
-  - name: source-release-modified
+  # second source-staging resource-staging needed because of the changelog commit. If used with only one
+  # resource-staging, the commit triggers the build pipeline
+  - name: source-staging-modified
     type: git
     source:
       uri: ((git_source))
+      private_key: ((private_key))
+      branch: ((git_release_branch))
+      skip_ssl_verification: ((git_skip_ssl_verification))  
+
+# release
+  - name: source-release
+    type: git
+    source:
+      uri: ((git_source))
+      tag_regex: release-[0-9]+.[0-9]+.[0-9]+
       private_key: ((private_key))
       branch: ((git_release_branch))
       skip_ssl_verification: ((git_skip_ssl_verification))      
 
   # S3 buckets
-  - name: s3-staging
+  # testing
+  - name: s3-testing-test-windows
+    type: s3
+    source:
+      bucket: ((testing_s3_bucket))
+      endpoint: ((s3_endpoint))
+      regexp: ((name))/test-windows-(.*)
+      access_key_id: ((s3_access_key))
+      secret_access_key: ((s3_secret_key))
+      disable_ssl: ((s3_skip_ssl_verification))
+
+  - name: s3-testing-test-linux
+    type: s3
+    source:
+      bucket: ((testing_s3_bucket))
+      endpoint: ((s3_endpoint))
+      regexp: ((name))/test-linux-(.*)
+      access_key_id: ((s3_access_key))
+      secret_access_key: ((s3_secret_key))
+      disable_ssl: ((s3_skip_ssl_verification))      
+
+# staging
+  - name: s3-staging-test-windows
     type: s3
     source:
       bucket: ((staging_s3_bucket))
       endpoint: ((s3_endpoint))
-      regexp: ((name))/test(.*)
+      regexp: ((name))/test-windows-(.*)
+      access_key_id: ((s3_access_key))
+      secret_access_key: ((s3_secret_key))
+      disable_ssl: ((s3_skip_ssl_verification))
+
+  - name: s3-staging-test-linux
+    type: s3
+    source:
+      bucket: ((staging_s3_bucket))
+      endpoint: ((s3_endpoint))
+      regexp: ((name))/test-linux-(.*)
       access_key_id: ((s3_access_key))
       secret_access_key: ((s3_secret_key))
       disable_ssl: ((s3_skip_ssl_verification))
@@ -71,16 +127,128 @@ resources:
       access_token: ((github_access_token))
       release: true
 
+unfreeze-release-branch: &unfreeze-release-branch
+  platform: linux
+  image_resource:
+    type: docker-image
+    source:
+      repository: curlimages/curl
+      tag: 7.74.0
+  run:
+    path: /bin/sh
+    args:
+      - -exc
+      - |
+        curl -d "frozen=false&user_name=((freeze_user))" -X POST ((freeze_uri))((freeze_token))
+
 jobs:
+  - name: testing-((name))
+    public: true
+    plan:
+      - in_parallel:
+          - get: source-testing
+            trigger: true
+          - get: image-golang
+          - get: image-aws-cli
+          - get: image-bb-gitversion-tool
+      - in_parallel:
+        - task: generate-version
+          image: image-bb-gitversion-tool
+          config:
+            platform: linux
+            inputs:
+              - name: source-testing
+            outputs:
+              - name: gitversion
+            run:
+              path: /bin/bash
+              args:
+                - -exc
+                - |
+                  entrypoint.sh &&
+                  jq empty gitversion/json/gitversion.json &&
+                  cat gitversion/json/gitversion.json
+            params:
+              GIT_PATH: source-testing
+              GEN_PATH: gitversion
+
+        - task: check-or-create-bucket-for-((staging_s3_bucket))-on-s3
+          image: image-aws-cli
+          config:
+            platform: linux
+            run:
+              path: /bin/bash
+              args:
+                - -xc
+                - |
+                  mkdir -p ~/.aws
+                  # hide setting credentials in plain text in concourse ui
+                  set +x
+                  export TERM="xterm-256color"
+                  echo "[default]" > ~/.aws/credentials
+                  echo "aws_access_key_id=((s3_access_key))" >> ~/.aws/credentials
+                  echo "aws_secret_access_key=((s3_secret_key))" >> ~/.aws/credentials
+                  set -x
+                  # check if bucket exists on s3 endpoint. If not create one
+                  aws --endpoint-url ((s3_endpoint)) s3api head-bucket --bucket ((testing_s3_bucket)) 2> /dev/null
+                  if [ $? != 0 ]; then aws s3 mb s3://((testing_s3_bucket)) --endpoint-url ((s3_endpoint)); fi
+
+      - task: build-test
+        image: image-golang
+        config:
+          platform: linux
+          inputs:
+            - name: source-testing
+            - name: gitversion
+          outputs:
+            - name: install
+          run:
+            path: /bin/bash
+            args:
+              - -ec
+              - |
+                ROOT=$(pwd)
+                cd ${ROOT}/source-testing/test
+                export VERSION=$(cat ${ROOT}/gitversion/plain/InformationalVersion)
+                make
+                mkdir -p ${ROOT}/install/${VERSION}/
+                cp ../bin/test-linux ${ROOT}/install/test-linux-${VERSION}
+                cp ../bin/test-windows.exe ${ROOT}/install/test-windows-${VERSION}.exe
+                ${ROOT}/install/test-linux*
+
+      - put: s3-testing-test-linux
+        params:
+          file: install/test-linux-*
+          acl: public-read
+
+      - put: s3-testing-test-windows
+        params:
+          file: install/test-windows-*
+          acl: public-read
+
   - name: staging-((name))
     public: true
     plan:
       - in_parallel:
+          - get: image-git-tool
           - get: source-staging
             trigger: true
+          - get: source-staging-modified
           - get: image-golang
+          - get: image-changelog-tool
+          - get: image-curl-tool
           - get: image-aws-cli
-
+      - task: freeze-release-branch
+        image: image-curl-tool
+        config:
+          platform: linux
+          run:
+            path: /bin/sh
+            args:
+              - -exc
+              - |
+                curl -d "frozen=true&user_name=((freeze_user))" -X POST ((freeze_uri))((freeze_token))
+      
       - task: check-or-create-bucket-for-((staging_s3_bucket))-on-s3
         image: image-aws-cli
         config:
@@ -102,65 +270,34 @@ jobs:
                 aws --endpoint-url ((s3_endpoint)) s3api head-bucket --bucket ((staging_s3_bucket)) 2> /dev/null
                 if [ $? != 0 ]; then aws s3 mb s3://((staging_s3_bucket)) --endpoint-url ((s3_endpoint)); fi
 
-      - task: build-kyt-cli
-        image: image-golang
-        config:
-          platform: linux
-          inputs:
-            - name: source-release-modified
-            - name: release-tag
-          outputs:
-            - name: install
-          run:
-            path: /bin/bash
-            args:
-              - -ec
-              - |
-                ROOT=$(pwd)
-                cd ${ROOT}/source-staging-modified/test
-                VERSION=$(cat ${ROOT}/staging-tag/tag) make
-                cp ../bin/* ${ROOT}/install
-                ${ROOT}/install/test-linux
-
-      - put: s3-staging
-        params:
-          file: install/test*
-          acl: public-read
-
-  - name: release-((name))
-    public: true
-    plan:
-      - in_parallel:
-          - get: image-git-tool
-          - get: source-release
-            trigger: true
-          - get: source-release-modified
-          - get: image-golang
-          - get: image-changelog-tool
-      - task: get-make-release-tag
+      - task: get-make-staging-tag
         image: image-git-tool
         config:
           platform: linux
           inputs:
-            - name: source-release
+            - name: source-staging
           outputs:
-            - name: release-tag
+            - name: tags
           run:
             path: /bin/sh
             args:
               - -exc
               - |
-                echo $(cd source-release && git tag --points-at HEAD | grep make-release) > release-tag/oldtag
-                echo $(cd source-release && git tag --points-at HEAD | grep make-release | awk -F"make-release-" '{print $2}') > release-tag/tag
-                cat release-tag/tag
+                echo $(cd source-staging && git tag --points-at HEAD | grep staging) > tags/stagingtagold
+                echo $(cd source-staging && git tag --points-at HEAD | grep staging | awk -F"staging-" '{print $2}') > tags/stagingtag
+                cat tags/stagingtag
+        on_failure:
+          task: task-failure
+          config:
+            << : *unfreeze-release-branch
 
       - task: generate-changelog
         image: image-changelog-tool
         config:
           platform: linux
           inputs:
-            - name: source-release
-            - name: release-tag
+            - name: source-staging
+            - name: tags
           outputs:
             - name: changelog
           run:
@@ -171,8 +308,12 @@ jobs:
                 ROOT=$(pwd)
                 cd changelog 
                 github_changelog_generator -t ((github_access_token)) --user ci4rail --project release_test
-                sed -i "s/$(cat ${ROOT}/release-tag/oldtag)/$(cat ${ROOT}/release-tag/tag)/g" ${ROOT}/changelog/CHANGELOG.md
+                sed -i "s/$(cat ${ROOT}/tags/stagingtagold)/$(cat ${ROOT}/tags/stagingtag)/g" ${ROOT}/changelog/CHANGELOG.md
                 cat ${ROOT}/changelog/CHANGELOG.md
+        on_failure:
+          task: task-failure
+          config:
+            << : *unfreeze-release-branch
 
       - task: commit-changelog
         image: image-git-tool
@@ -180,34 +321,42 @@ jobs:
           platform: linux
           inputs:
             - name: changelog
-            - name: release-tag
-            - name: source-release-modified
+            - name: tags
+            - name: source-staging-modified
           outputs:
-            - name: source-release-modified
+            - name: source-staging-modified
           run:
             path: /bin/sh
             args:
               - -ec
               - |
                 ROOT=$(pwd)
-                cd source-release-modified
+                cd source-staging-modified
                 cp ${ROOT}/changelog/CHANGELOG.md .
                 git config --global user.email "engineering@ci4rail.com"
                 git config --global user.name "yoda-ci4rail"
                 git add CHANGELOG.md
-                git commit -am "Updated CHANGELOG.md for release $(cat ${ROOT}/release-tag/tag)"
+                git commit -am "Release $(cat ${ROOT}/tags/stagingtag)"
+          on_failure:
+            task: task-failure
+            config:
+              << : *unfreeze-release-branch
   
-      - put: source-release-modified
+      - put: source-staging-modified
         params: 
-          repository: source-release-modified
+          repository: source-staging-modified
+        on_failure:
+          task: task-failure
+          config:
+            << : *unfreeze-release-branch
 
       - task: build-kyt-cli
         image: image-golang
         config:
           platform: linux
           inputs:
-            - name: source-release-modified
-            - name: release-tag
+            - name: source-staging-modified
+            - name: tags
           outputs:
             - name: install
           run:
@@ -216,120 +365,77 @@ jobs:
               - -ec
               - |
                 ROOT=$(pwd)
-                cd ${ROOT}/source-release-modified/test
-                VERSION=$(cat ${ROOT}/release-tag/tag) make
+                cd ${ROOT}/source-staging-modified/test
+                VERSION=$(cat ${ROOT}/tags/stagingtag) make
+                cp ../bin/* ${ROOT}/install
+                ${ROOT}/install/test-linux
+        on_failure:
+          task: task-failure
+          config:
+            << : *unfreeze-release-branch
+
+      - put: s3-staging-test-linux
+        params:
+          file: install/test-linux-*
+          acl: public-read
+
+      - put: s3-staging-test-windows
+        params:
+          file: install/test-windows-*
+          acl: public-read
+      
+      - task: unfreeze-release-branch
+        config:
+          << : *unfreeze-release-branch
+
+  - name: release-((name))
+    public: true
+    plan:
+      - in_parallel:
+          - get: source-release
+            trigger: true
+          - get: image-golang
+          - get: image-git-tool
+      
+      - task: get-make-release-tag
+        image: image-git-tool
+        config:
+          platform: linux
+          inputs:
+            - name: source-release
+          outputs:
+            - name: tags
+          run:
+            path: /bin/sh
+            args:
+              - -exc
+              - |
+                echo $(cd source-staging && git tag --points-at HEAD | grep release) > tags/releasetag
+                cat tags/releasetag
+
+      - task: build-kyt-cli
+        image: image-golang
+        config:
+          platform: linux
+          inputs:
+            - name: source-release
+            - name: tags
+          outputs:
+            - name: install
+          run:
+            path: /bin/bash
+            args:
+              - -ec
+              - |
+                ROOT=$(pwd)
+                cd ${ROOT}/source-release/test
+                VERSION=$(cat ${ROOT}/tags/releasetag) make
                 cp ../bin/* ${ROOT}/install
                 ${ROOT}/install/test-linux
 
       - put: gh-release
         params:
-          name: release-tag/tag
-          tag: release-tag/tag
+          name: tags/releasetag
+          tag: tags/releasetag
           globs:
             - install/*
-
-      # - task: test-kyt-cli
-      #   image: image-golang
-      #   config:
-      #     platform: linux
-      #     inputs:
-      #       - name: install
-      #       - name: release-tag
-      #     run:
-      #       path: /bin/bash
-      #       args:
-      #         - -ec
-      #         - |
-      #           echo success
-
-
-
-
-
-  # - name: release-((name))
-  #   public: true
-  #   plan:
-  #     - in_parallel:
-  #         - get: image-bb-gitversion-tool
-  #         - get: source-tag
-  #           trigger: true
-  #         - get: image-golang
-
-  #     - task: generate-version
-  #       image: image-bb-gitversion-tool
-  #       config:
-  #         platform: linux
-  #         inputs:
-  #           - name: source-tag
-  #         outputs:
-  #           - name: gitversion
-  #         run:
-  #           path: /bin/bash
-  #           args:
-  #             - -exc
-  #             - |
-  #               entrypoint.sh &&
-  #               jq empty gitversion/json/gitversion.json &&
-  #               cat gitversion/json/gitversion.json
-  #         params:
-  #           GIT_PATH: source
-  #           GEN_PATH: gitversion
-
-  #     - task: build-kyt-cli
-  #       image: image-golang
-  #       config:
-  #         platform: linux
-  #         inputs:
-  #           - name: source-tag
-  #           - name: gitversion
-  #         outputs:
-  #           - name: install
-  #         run:
-  #           path: /bin/bash
-  #           args:
-  #             - -ec
-  #             - |
-  #               ROOT=$(pwd)
-  #               cd ${ROOT}/source-tag/test
-  #               VERSION=$(cat ${ROOT}/gitversion/plain/InformationalVersion) make
-  #               cp ../bin/* ${ROOT}/install
-
-  #     - task: test-kyt-cli
-  #       image: image-golang
-  #       config:
-  #         platform: linux
-  #         inputs:
-  #           - name: install
-  #           - name: gitversion
-  #         run:
-  #           path: /bin/bash
-  #           args:
-  #             - -ec
-  #             - |
-  #               if [ "$(install/test-linux | grep $(cat ${ROOT}/gitversion/plain/SemVer) | wc -l)" != "1" ]; then
-  #                 exit 1
-  #               fi
-
-  #     - task: changelog
-  #       image: image-changelog-tool
-  #       config:
-  #         platform: linux
-  #         inputs:
-  #           - name: install
-  #           - name: gitversion
-  #         run:
-  #           path: /bin/bash
-  #           args:
-  #             - -ec
-  #             - |
-  #               if [ "$(install/test-linux | grep $(cat ${ROOT}/gitversion/plain/SemVer) | wc -l)" != "1" ]; then
-  #                 exit 1
-  #               fi
-                
-
-  #     - put: gh-release
-  #       params:
-  #         name: gitversion/plain/SemVer
-  #         tag: gitversion/plain/SemVer
-  #         globs:
-  #           - install/*

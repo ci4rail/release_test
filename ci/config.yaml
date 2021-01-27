@@ -23,3 +23,7 @@ s3_skip_ssl_verification: false
 
 # Staging configuration
 staging_s3_bucket: staging-release-test
+testing_s3_bucket: testing-release-test
+
+freeze_user: ci4rail-yoda
+freeze_uri: https://www.mergefreeze.com/api/branches/ci4rail/release_test/main/?access_token=
