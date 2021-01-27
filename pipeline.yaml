@@ -17,25 +17,50 @@ resources:
       repository: golang
       tag: 1.15.6-buster
 
+  - name: image-aws-cli
+    type: docker-image
+    source:
+      repository: amazon/aws-cli
+      tag: 2.0.22
+
   # Git sources
-  - name: source
+  - name: source-staging
     type: git
     source:
       uri: ((git_source))
-      tag_filter: "make-release-*.*.*"
       private_key: ((private_key))
       branch: ((git_branch))
       skip_ssl_verification: ((git_skip_ssl_verification))
 
-  # second source resource needed because of the changelog commit. If used with only one
-  # resource, the commit triggers the build pipeline
-  - name: source-modified
+  - name: source-release
+    type: git
+    source:
+      uri: ((git_source))
+      tag_regex: make-release-[0-9]+.[0-9]+.[0-9]+
+      private_key: ((private_key))
+      branch: ((git_release_branch))
+      skip_ssl_verification: ((git_skip_ssl_verification))
+
+  # second source-release resource-release needed because of the changelog commit. If used with only one
+  # resource-release, the commit triggers the build pipeline
+  - name: source-release-modified
     type: git
     source:
       uri: ((git_source))
       private_key: ((private_key))
-      branch: ((git_branch))
+      branch: ((git_release_branch))
       skip_ssl_verification: ((git_skip_ssl_verification))      
+
+  # S3 buckets
+  - name: s3-staging
+    type: s3
+    source:
+      bucket: ((staging_s3_bucket))
+      endpoint: ((s3_endpoint))
+      regexp: ((name))/test(.*)
+      access_key_id: ((s3_access_key))
+      secret_access_key: ((s3_secret_key))
+      disable_ssl: ((s3_skip_ssl_verification))
 
   # Github release
   - name: gh-release
@@ -47,14 +72,69 @@ resources:
       release: true
 
 jobs:
+  - name: staging-((name))
+    public: true
+    plan:
+      - in_parallel:
+          - get: source-staging
+            trigger: true
+          - get: image-golang
+          - get: image-aws-cli
+
+      - task: check-or-create-bucket-for-((staging_s3_bucket))-on-s3
+        image: image-aws-cli
+        config:
+          platform: linux
+          run:
+            path: /bin/bash
+            args:
+              - -xc
+              - |
+                mkdir -p ~/.aws
+                # hide setting credentials in plain text in concourse ui
+                set +x
+                export TERM="xterm-256color"
+                echo "[default]" > ~/.aws/credentials
+                echo "aws_access_key_id=((s3_access_key))" >> ~/.aws/credentials
+                echo "aws_secret_access_key=((s3_secret_key))" >> ~/.aws/credentials
+                set -x
+                # check if bucket exists on s3 endpoint. If not create one
+                aws --endpoint-url ((s3_endpoint)) s3api head-bucket --bucket ((staging_s3_bucket)) 2> /dev/null
+                if [ $? != 0 ]; then aws s3 mb s3://((staging_s3_bucket)) --endpoint-url ((s3_endpoint)); fi
+
+      - task: build-kyt-cli
+        image: image-golang
+        config:
+          platform: linux
+          inputs:
+            - name: source-release-modified
+            - name: release-tag
+          outputs:
+            - name: install
+          run:
+            path: /bin/bash
+            args:
+              - -ec
+              - |
+                ROOT=$(pwd)
+                cd ${ROOT}/source-staging-modified/test
+                VERSION=$(cat ${ROOT}/staging-tag/tag) make
+                cp ../bin/* ${ROOT}/install
+                ${ROOT}/install/test-linux
+
+      - put: s3-staging
+        params:
+          file: install/test*
+          acl: public-read
+
   - name: release-((name))
     public: true
     plan:
       - in_parallel:
           - get: image-git-tool
-          - get: source
+          - get: source-release
             trigger: true
-          - get: source-modified
+          - get: source-release-modified
           - get: image-golang
           - get: image-changelog-tool
       - task: get-make-release-tag
@@ -62,7 +142,7 @@ jobs:
         config:
           platform: linux
           inputs:
-            - name: source
+            - name: source-release
           outputs:
             - name: release-tag
           run:
@@ -70,8 +150,8 @@ jobs:
             args:
               - -exc
               - |
-                echo $(cd source && git tag --points-at HEAD | grep make-release) > release-tag/oldtag
-                echo $(cd source && git tag --points-at HEAD | grep make-release | awk -F"make-release-" '{print $2}') > release-tag/tag
+                echo $(cd source-release && git tag --points-at HEAD | grep make-release) > release-tag/oldtag
+                echo $(cd source-release && git tag --points-at HEAD | grep make-release | awk -F"make-release-" '{print $2}') > release-tag/tag
                 cat release-tag/tag
 
       - task: generate-changelog
@@ -79,7 +159,7 @@ jobs:
         config:
           platform: linux
           inputs:
-            - name: source
+            - name: source-release
             - name: release-tag
           outputs:
             - name: changelog
@@ -101,32 +181,32 @@ jobs:
           inputs:
             - name: changelog
             - name: release-tag
-            - name: source-modified
+            - name: source-release-modified
           outputs:
-            - name: source-modified
+            - name: source-release-modified
           run:
             path: /bin/sh
             args:
               - -ec
               - |
                 ROOT=$(pwd)
-                cd source-modified
+                cd source-release-modified
                 cp ${ROOT}/changelog/CHANGELOG.md .
                 git config --global user.email "engineering@ci4rail.com"
                 git config --global user.name "yoda-ci4rail"
                 git add CHANGELOG.md
                 git commit -am "Updated CHANGELOG.md for release $(cat ${ROOT}/release-tag/tag)"
   
-      - put: source-modified
+      - put: source-release-modified
         params: 
-          repository: source-modified
+          repository: source-release-modified
 
       - task: build-kyt-cli
         image: image-golang
         config:
           platform: linux
           inputs:
-            - name: source-modified
+            - name: source-release-modified
             - name: release-tag
           outputs:
             - name: install
@@ -136,7 +216,7 @@ jobs:
               - -ec
               - |
                 ROOT=$(pwd)
-                cd ${ROOT}/source-modified/test
+                cd ${ROOT}/source-release-modified/test
                 VERSION=$(cat ${ROOT}/release-tag/tag) make
                 cp ../bin/* ${ROOT}/install
                 ${ROOT}/install/test-linux
