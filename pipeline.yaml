@@ -24,10 +24,12 @@ jobs:
             source:
               repository: cfmanteiga/alpine-bash-curl-jq
               tag: latest
-
+          inputs:
+            - name: source
           run:
             path: /bin/bash
             args:
               - -c
               - |
                 echo triggered pipeline
+                cat source/.git/short_ref
