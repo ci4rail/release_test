@@ -7,6 +7,7 @@ resources:
       uri: ((git_source))
       private_key: ((private_key))
       branch: ((git_branch))
+      tag_regex: ((git_tag_regex))
       skip_ssl_verification: ((git_skip_ssl_verification))
 
 jobs:
